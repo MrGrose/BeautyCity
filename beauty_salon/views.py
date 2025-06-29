@@ -474,9 +474,9 @@ def view_tips(request):
     elif request.method == "POST":
         master_id = request.POST.get("master_id")
         appointment_id = request.POST.get("appointment_id")
-        amount_str = request.POST.get("amount")
+        amount_tips = request.POST.get("amount")
         try:
-            amount = Decimal(amount_str)
+            amount = Decimal(amount_tips)
             if amount <= 0:
                 messages.error(request, "Ошибка: Чаевые должны быть положительным числом.")
                 raise ValueError
@@ -494,5 +494,5 @@ def view_tips(request):
         return render(request, "tips.html", {
             "master_id": master_id,
             "appointment_id": appointment_id,
-            "amount": amount_str,
+            "amount": amount_tips,
         })
