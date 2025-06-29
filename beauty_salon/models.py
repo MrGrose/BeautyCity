@@ -1,7 +1,7 @@
 from datetime import date
 
 from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 
@@ -281,6 +281,7 @@ class Appointment(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(99999)]
     )
 
     class Meta:

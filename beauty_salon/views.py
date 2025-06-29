@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime
+from decimal import InvalidOperation
 
 from beauty_salon.utils import get_month_info
 from django.conf import settings
@@ -7,6 +8,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -22,6 +24,7 @@ Configuration.account_id = settings.YOOKASSA_SHOP_ID
 Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
 
+@transaction.atomic
 def create_payment(request, appointment_id):
 
     appointment = get_object_or_404(Appointment, id=appointment_id)
@@ -51,6 +54,7 @@ def create_payment(request, appointment_id):
     return redirect(payment.confirmation.confirmation_url)
 
 
+@transaction.atomic
 def create_tips_payment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
     tips = appointment.tips or 0
@@ -462,6 +466,7 @@ def privacy_policy(request):
     return render(request, "privacy_policy.html")
 
 
+@transaction.atomic
 def view_tips(request):
     if request.method == "GET":
         master_id = request.GET.get('master_id')
@@ -471,9 +476,24 @@ def view_tips(request):
             'appointment_id': appointment_id,
         })
     elif request.method == "POST":
-        amount = request.POST.get('amount')
-        appointment_id = request.POST.get('appointment_id')
-        appointment = Appointment.objects.get(id=appointment_id)
-        appointment.tips = amount
-        appointment.save()
-        return redirect('beauty_salon:create_tips_payment', appointment_id=appointment_id)
+        master_id = request.GET.get('master_id')
+        appointment_id = request.GET.get('appointment_id')
+        try:
+            amount = request.POST.get('amount')
+            appointment_id = request.POST.get('appointment_id')
+            appointment = Appointment.objects.get(id=appointment_id)
+            appointment.tips = amount
+            appointment.save()
+            return redirect('beauty_salon:create_tips_payment', appointment_id=appointment_id)
+        except (InvalidOperation, ValueError):
+            messages.error(request, "Ошибка: Некорректное значение чаевых.")
+        except Appointment.DoesNotExist:
+            messages.error(request, "Ошибка: Запись о приеме не найдена.")
+        except Exception as e:
+            messages.error(request, f"Произошла ошибка: {str(e)}")
+
+        return render(request, 'tips.html', {
+            'master_id': master_id,
+            'appointment_id': appointment_id,
+            'amount': request.POST.get('amount', ''),
+        })
