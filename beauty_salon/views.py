@@ -479,7 +479,7 @@ def view_tips(request):
             amount = Decimal(amount_str)
             if amount <= 0:
                 messages.error(request, "Ошибка: Чаевые должны быть положительным числом.")
-                raise ValueError("Отрицательное или нулевое значение чаевых")
+                raise ValueError
             appointment = Appointment.objects.get(id=appointment_id)
             appointment.tips = amount
             appointment.save()
