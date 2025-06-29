@@ -1,6 +1,6 @@
 import json
 from datetime import date, datetime
-from decimal import InvalidOperation
+from decimal import Decimal, InvalidOperation
 
 from beauty_salon.utils import get_month_info
 from django.conf import settings
@@ -8,7 +8,6 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,7 +23,6 @@ Configuration.account_id = settings.YOOKASSA_SHOP_ID
 Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
 
-@transaction.atomic
 def create_payment(request, appointment_id):
 
     appointment = get_object_or_404(Appointment, id=appointment_id)
@@ -54,13 +52,12 @@ def create_payment(request, appointment_id):
     return redirect(payment.confirmation.confirmation_url)
 
 
-@transaction.atomic
 def create_tips_payment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
     tips = appointment.tips or 0
 
     if tips <= 0:
-        return redirect('beauty_salon:notes')
+        return redirect("beauty_salon:notes")
 
     payment = Payment.create({
         "amount": {
@@ -70,7 +67,7 @@ def create_tips_payment(request, appointment_id):
         "confirmation": {
             "type": "redirect",
             "return_url": request.build_absolute_uri(
-                reverse('beauty_salon:notes') + f'?appointment_id={appointment.id}'
+                reverse("beauty_salon:notes") + f"?appointment_id={appointment.id}"
             )
         },
         "capture": True,
@@ -466,25 +463,27 @@ def privacy_policy(request):
     return render(request, "privacy_policy.html")
 
 
-@transaction.atomic
 def view_tips(request):
     if request.method == "GET":
-        master_id = request.GET.get('master_id')
-        appointment_id = request.GET.get('appointment_id')
-        return render(request, 'tips.html', {
-            'master_id': master_id,
-            'appointment_id': appointment_id,
+        master_id = request.GET.get("master_id")
+        appointment_id = request.GET.get("appointment_id")
+        return render(request, "tips.html", {
+            "master_id": master_id,
+            "appointment_id": appointment_id,
         })
     elif request.method == "POST":
-        master_id = request.GET.get('master_id')
-        appointment_id = request.GET.get('appointment_id')
+        master_id = request.POST.get("master_id")
+        appointment_id = request.POST.get("appointment_id")
+        amount_str = request.POST.get("amount")
         try:
-            amount = request.POST.get('amount')
-            appointment_id = request.POST.get('appointment_id')
+            amount = Decimal(amount_str)
+            if amount <= 0:
+                messages.error(request, "Ошибка: Чаевые должны быть положительным числом.")
+                raise ValueError("Отрицательное или нулевое значение чаевых")
             appointment = Appointment.objects.get(id=appointment_id)
             appointment.tips = amount
             appointment.save()
-            return redirect('beauty_salon:create_tips_payment', appointment_id=appointment_id)
+            return redirect("beauty_salon:create_tips_payment", appointment_id=appointment_id)
         except (InvalidOperation, ValueError):
             messages.error(request, "Ошибка: Некорректное значение чаевых.")
         except Appointment.DoesNotExist:
@@ -492,8 +491,8 @@ def view_tips(request):
         except Exception as e:
             messages.error(request, f"Произошла ошибка: {str(e)}")
 
-        return render(request, 'tips.html', {
-            'master_id': master_id,
-            'appointment_id': appointment_id,
-            'amount': request.POST.get('amount', ''),
+        return render(request, "tips.html", {
+            "master_id": master_id,
+            "appointment_id": appointment_id,
+            "amount": amount_str,
         })
