@@ -1,5 +1,3 @@
-import calendar
-
 from django.utils import timezone
 from phonenumbers import NumberParseException, is_valid_number, parse
 

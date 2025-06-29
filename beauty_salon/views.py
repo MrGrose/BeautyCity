@@ -1,15 +1,138 @@
+import json
 from datetime import date, datetime
 
 from beauty_salon.utils import get_month_info
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from yookassa import Configuration, Payment
 
 from .forms import LoginForm, RegisterUser
 from .models import Appointment, Client, Feedback, Master, Salon, Service
 from .utils import validate_phone
+
+Configuration.account_id = settings.YOOKASSA_SHOP_ID
+Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
+
+def create_payment(request, appointment_id):
+
+    appointment = get_object_or_404(Appointment, id=appointment_id)
+
+    payment = Payment.create({
+        "amount": {
+            "value": str(appointment.service.price),
+            "currency": "RUB"
+        },
+        "confirmation": {
+            "type": "redirect",
+            "return_url": request.build_absolute_uri(
+                reverse("beauty_salon:notes") + f"?appointment_id={appointment.id}"
+            )
+        },
+        "capture": True,
+        "description": f"Оплата услуги: {appointment.service.name}",
+        "metadata": {
+            "appointment_id": appointment.id
+        }
+    })
+
+    appointment.yookassa_payment_id = payment.id
+    appointment.payment_status = "waiting"
+    appointment.save()
+
+    return redirect(payment.confirmation.confirmation_url)
+
+
+def create_tips_payment(request, appointment_id):
+    appointment = get_object_or_404(Appointment, id=appointment_id)
+    tips = appointment.tips or 0
+
+    if tips <= 0:
+        return redirect('beauty_salon:notes')
+
+    payment = Payment.create({
+        "amount": {
+            "value": str(tips),
+            "currency": "RUB"
+        },
+        "confirmation": {
+            "type": "redirect",
+            "return_url": request.build_absolute_uri(
+                reverse('beauty_salon:notes') + f'?appointment_id={appointment.id}'
+            )
+        },
+        "capture": True,
+        "description": f"Чаевые для мастера: {appointment.master.name}",
+        "metadata": {
+            "appointment_id": appointment.id,
+            "tips": str(tips)
+        }
+    })
+    appointment.yookassa_tips_payment_id = payment.id
+    appointment.payment_status = "waiting"
+    appointment.save()
+
+    return redirect(payment.confirmation.confirmation_url)
+
+
+def payment_success(request):
+    payment_id = request.GET.get("payment_id")
+    if payment_id:
+        try:
+            payment = Payment.find_one(payment_id)
+            if payment.status == "succeeded":
+                appointment = Appointment.objects.get(yookassa_payment_id=payment_id)
+                appointment.payment_status = "paid"
+                appointment.payment_date = timezone.now()
+                appointment.save()
+                messages.success(request, "Оплата прошла успешно!")
+        except Exception:
+            pass
+
+    return redirect("beauty_salon:notes")
+
+
+def payment_fail(request):
+    payment_id = request.GET.get("payment_id")
+    if payment_id:
+        try:
+            appointment = Appointment.objects.get(yookassa_payment_id=payment_id)
+            appointment.payment_status = "failed"
+            appointment.save()
+            messages.error(request, "Оплата не была завершена")
+        except Exception:
+            pass
+
+    return redirect("beauty_salon:notes")
+
+
+@csrf_exempt
+def yookassa_webhook(request):
+    if request.method == "POST":
+        event_json = json.loads(request.body)
+        payment_id = event_json["object"]["id"]
+
+        try:
+            appointment = Appointment.objects.get(yookassa_payment_id=payment_id)
+            payment = Payment.find_one(payment_id)
+
+            if payment.status == "succeeded":
+                appointment.payment_status = "paid"
+                appointment.payment_date = timezone.now()
+                appointment.save()
+
+        except Exception:
+            pass
+
+    return HttpResponse(status=200)
 
 
 def index(request):
@@ -26,7 +149,7 @@ def index(request):
             personal_data_consent=personal_data_consent,
             comment=f"Вопрос: {question}" if question else "Консультация"
         )
-        messages.success(request, 'Спасибо за обращение! Мы свяжемся с вами в ближайшее время.')
+        messages.success(request, "Спасибо за обращение! Мы свяжемся с вами в ближайшее время.")
 
     salons = Salon.objects.order_by("name")
     services = Service.objects.all()
@@ -46,69 +169,60 @@ def index(request):
 
 def service(request):
     salons = Salon.objects.order_by("name")
-    return render(request, 'service.html', {"salons": salons})
+    return render(request, "service.html", {"salons": salons})
 
 
+@login_required
 def service_finally(request):
-    if request.method == 'POST':
-        # Получаем данные из формы
-        phone = request.POST.get('tel')
-        name = request.POST.get('fname')
-        salon_id = request.POST.get('salon')
-        master_id = request.POST.get('master')
-        service_id = request.POST.get('service')
-        date_str = request.POST.get('date')
-        time = request.POST.get('time')
-        
-        # Преобразуем строку даты в объект date
+    if request.method == "POST":
+        phone = request.POST.get("tel")
+        name = request.POST.get("fname")
+        salon_id = request.POST.get("salon")
+        master_id = request.POST.get("master")
+        service_id = request.POST.get("service")
+        date_str = request.POST.get("date")
+        time = request.POST.get("time")
+
         try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         except (ValueError, TypeError):
-            messages.error(request, 'Неверный формат даты!')
-            return render(request, 'serviceFinally.html', {'error': True})
-        
-        # Проверяем, не существует ли уже запись с такими же параметрами
-        # Мастер не может работать одновременно с разными сервисами в одно время
+            messages.error(request, "Неверный формат даты!")
+            return render(request, "serviceFinally.html", {"error": True})
+
         existing_appointment = Appointment.objects.filter(
             date=date_obj,
             time=time,
             master_id=master_id,
             salon_id=salon_id,
-            status__in=['recorded', 'completed']
+            status__in=["recorded", "completed"]
         ).first()
-        
+
         if existing_appointment:
-            messages.error(request, f'Запись на это время уже существует! Мастер {existing_appointment.master.name} уже занят в {time} на {date_obj}.')
-            return render(request, 'serviceFinally.html', {'error': True})
-        
-        # Если пользователь авторизован, ищем клиента по пользователю
+            messages.error(request, f"Запись на это время уже существует! Мастер {existing_appointment.master.name} уже занят в {time} на {date_obj}.")
+            return render(request, "serviceFinally.html", {"error": True})
+
         if request.user.is_authenticated:
             try:
                 client = Client.objects.get(user=request.user)
-                # Обновляем телефон, если он изменился
                 if client.phone != phone:
                     client.phone = phone
-                # Обновляем имя, если оно не указано в форме
-                if not name and hasattr(request.user, 'first_name') and request.user.first_name:
+                if not name and hasattr(request.user, "first_name") and request.user.first_name:
                     name = request.user.first_name
                 client.personal_data_consent = True
                 client.save()
             except Client.DoesNotExist:
-                # Создаем нового клиента для авторизованного пользователя
                 client = Client.objects.create(
                     phone=phone,
                     user=request.user,
                     personal_data_consent=True
                 )
         else:
-            # Для неавторизованных пользователей ищем по телефону
             client, _ = Client.objects.get_or_create(phone=phone)
             client.personal_data_consent = True
             client.save()
-        
-        # Создаём запись
+
         try:
-            appointment = Appointment.objects.create(
+            Appointment.objects.create(
                 phone=phone,
                 client_name=name,
                 date=date_obj,
@@ -119,72 +233,98 @@ def service_finally(request):
                 service_id=service_id,
                 personal_data_consent=True
             )
-            messages.success(request, 'Запись успешно создана!')
-            return render(request, 'serviceFinally.html', {'success': True})
+            messages.success(request, "Запись успешно создана!")
+            return render(request, "serviceFinally.html", {"success": True})
         except ValueError as e:
-            if 'Мастер уже занят в это время' in str(e):
-                messages.error(request, 'Мастер уже занят в это время!')
+            if "Мастер уже занят в это время" in str(e):
+                messages.error(request, "Мастер уже занят в это время!")
             else:
-                messages.error(request, 'Ошибка при создании записи!')
-            return render(request, 'serviceFinally.html', {'error': True})
+                messages.error(request, "Ошибка при создании записи!")
+            return render(request, "serviceFinally.html", {"error": True})
     else:
-        # GET: показываем детали выбранной записи
-        salon_id = request.GET.get('salon')
-        master_id = request.GET.get('master')
-        service_id = request.GET.get('service')
-        date = request.GET.get('date')
-        time = request.GET.get('time')
+        salon_id = request.GET.get("salon")
+        master_id = request.GET.get("master")
+        service_id = request.GET.get("service")
+        date = request.GET.get("date")
+        time = request.GET.get("time")
         context = {}
         if salon_id:
-            context['salon'] = get_object_or_404(Salon, id=salon_id)
+            context["salon"] = get_object_or_404(Salon, id=salon_id)
         if master_id:
-            context['master'] = get_object_or_404(Master, id=master_id)
+            context["master"] = get_object_or_404(Master, id=master_id)
         if service_id:
-            context['service'] = get_object_or_404(Service, id=service_id)
-        context['date'] = date
-        context['time'] = time
-        return render(request, 'serviceFinally.html', context)
+            context["service"] = get_object_or_404(Service, id=service_id)
+        context["date"] = date
+        context["time"] = time
+        return render(request, "serviceFinally.html", context)
 
 
 @login_required
 def notes(request):
+    payment_id = request.GET.get("payment_id")
+    appointment_id = request.GET.get("appointment_id")
 
-    if not request.user.is_authenticated:
-        return render(request, 'notes.html', {'upcoming_appointments': [], 'past_appointments': []})
+    if payment_id or appointment_id:
+        try:
+            if payment_id:
+                appointment = Appointment.objects.get(
+                    yookassa_payment_id=payment_id,
+                    client__user=request.user
+                )
+            else:
+                appointment = Appointment.objects.get(
+                    id=appointment_id,
+                    client__user=request.user
+                )
+
+            if appointment.yookassa_payment_id:
+                payment = Payment.find_one(appointment.yookassa_payment_id)
+                if payment.status == "succeeded" and appointment.payment_status != "paid":
+                    appointment.payment_status = "paid"
+                    appointment.payment_date = timezone.now()
+                    appointment.save()
+                    messages.success(request, "Оплата прошла успешно!")
+                elif payment.status == "canceled" and appointment.payment_status != "failed":
+                    appointment.payment_status = "failed"
+                    appointment.save()
+                    messages.error(request, "Платеж был отменен")
+        except Appointment.DoesNotExist:
+            messages.error(request, "Запись не найдена")
+        except Exception:
+            messages.error(request, "Ошибка при проверке статуса платежа")
+
     try:
         client = Client.objects.get(user=request.user)
+
+        today = date.today()
+        upcoming_appointments = Appointment.objects.filter(
+            client=client,
+            date__gte=today,
+            status__in=["recorded"]
+        ).order_by("date", "time")
+
+        past_appointments = Appointment.objects.filter(
+            client=client, 
+            date__lt=today, 
+            status__in=["completed", "canceled"]
+        ).order_by("-date", "-time")
+
     except Client.DoesNotExist:
-        return render(request, 'notes.html', {'upcoming_appointments': [], 'past_appointments': []})
+        upcoming_appointments = []
+        past_appointments = []
 
-    today = date.today()
-    upcoming_appointments = Appointment.objects.filter(
-        client=client,
-        date__gte=today,
-        status__in=['recorded']
-    ).order_by('date', 'time')
-
-    past_appointments = Appointment.objects.filter(
-        client=client, 
-        date__lt=today, 
-        status__in=['completed', 'canceled']
-    ).order_by('-date', '-time')
-
-    return render(request, 'notes.html', {
-        'upcoming_appointments': upcoming_appointments,
-        'past_appointments': past_appointments,
-        'is_manager': request.user.is_staff,
+    return render(request, "notes.html", {
+        "upcoming_appointments": upcoming_appointments,
+        "past_appointments": past_appointments,
+        "is_manager": request.user.is_staff,
     })
-
-
-def popup(request):
-    return render(request, 'popup.html')
 
 
 def view_call_me(request):
     errors = {}
     if request.method == "POST":
-        contact_tel = request.POST.get('tel')
-        personal_data_consent = bool(request.POST.get('checkbox'))
+        contact_tel = request.POST.get("tel")
+        personal_data_consent = bool(request.POST.get("checkbox"))
 
         if not validate_phone(contact_tel):
             errors["contact_tel"] = ["Введен некорректный номер телефона."]
@@ -197,7 +337,7 @@ def view_call_me(request):
             personal_data_consent=personal_data_consent,
             comment="Перезвонить"
         )
-        messages.success(request, 'Спасибо, мы вам перезвоним в течение часа.')
+        messages.success(request, "Спасибо, мы вам перезвоним в течение часа.")
         return redirect("beauty_salon:index")
 
     return render(request, "call_me.html")
@@ -319,5 +459,21 @@ def view_manager(request):
 
 
 def privacy_policy(request):
-    """Отображение политики конфиденциальности"""
-    return render(request, 'privacy_policy.html')
+    return render(request, "privacy_policy.html")
+
+
+def view_tips(request):
+    if request.method == "GET":
+        master_id = request.GET.get('master_id')
+        appointment_id = request.GET.get('appointment_id')
+        return render(request, 'tips.html', {
+            'master_id': master_id,
+            'appointment_id': appointment_id,
+        })
+    elif request.method == "POST":
+        amount = request.POST.get('amount')
+        appointment_id = request.POST.get('appointment_id')
+        appointment = Appointment.objects.get(id=appointment_id)
+        appointment.tips = amount
+        appointment.save()
+        return redirect('beauty_salon:create_tips_payment', appointment_id=appointment_id)

@@ -1,15 +1,23 @@
 import os
 from pathlib import Path
 
+from environs import Env
+
+env = Env()
+env.read_env()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-c*prc0=l(m4b6*_vfv4frjydjjyo(%%o@tlp!zto2@!ze+@-e1'
+SECRET_KEY = env.str('SECRET_KEY')
+DEBUG = env.bool('DEBUG', default=False)
 
-DEBUG = True
+YOOKASSA_SHOP_ID = env('YOOKASSA_SHOP_ID')
+YOOKASSA_SECRET_KEY = env('YOOKASSA_SECRET_KEY')
+YOOKASSA_RETURN_URL = 'http://127.0.0.1:8000/notes/'
 
-ALLOWED_HOSTS = []
-
-
+# ALLOWED_HOSTS = ["vuw9lq-46-164-249-58.ru.tuna.am"]
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', [])
+# CSRF_TRUSTED_ORIGINS = ["https://vuw9lq-46-164-249-58.ru.tuna.am",]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -51,8 +59,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'BeutyCity.wsgi.application'
-
-
 
 DATABASES = {
     'default': {

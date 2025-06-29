@@ -1,8 +1,6 @@
-from beauty_salon.models import (Master, Appointment, Salon,
-                                 Service, Client, Feedback)
+from beauty_salon.models import (Appointment, Client, Feedback, Master, Salon,
+                                 Service)
 from django.contrib import admin
-from django.urls import reverse
-from django.utils.html import format_html
 
 
 @admin.register(Client)
@@ -10,7 +8,7 @@ class ClientAdmin(admin.ModelAdmin):
     list_display = ("phone", "get_user_info", "personal_data_consent",)
     list_filter = ("personal_data_consent",)
     search_fields = ("phone", "user__username", "user__first_name", "user__last_name", "user__email")
-    
+
     fieldsets = (
         ("Основная информация", {
             "fields": ("phone", "user", "personal_data_consent")
@@ -55,14 +53,15 @@ class MasterAdmin(admin.ModelAdmin):
 class AppointmentAdmin(admin.ModelAdmin):
     list_display = (
         "get_client_name_display",
-        "get_client_phone_display", 
+        "get_client_phone_display",
         "master",
-        "salon", 
-        "service", 
+        "service",
+        "tips",
+        "salon",
         "date",
         "time",
         "status",
-        "comment"
+        "comment",
     )
     list_filter = ("status", "date", "master", "salon", "service")
     search_fields = ("phone", "client_name", "master__name", "salon__name", "service__name", "comment")

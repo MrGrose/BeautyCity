@@ -1,0 +1,27 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Beauty City</title>
+	<link rel="stylesheet" href="{% static 'css/main.css' %}">
+</head>
+<body style="display: flex; justify-content: center; align-items: center; min-height: 80vh;">
+	<div class="tipsPopup popup">
+		<div class="popup__title tipsPopup__title" style="display: flex; justify-content: center;">Чаевые</div>
+        <form method="post" action="{% url 'beauty_salon:view_tips' %}" class="tipsPopup__form">
+            {% csrf_token %}
+            <input type="hidden" name="master_id" value="{{ master_id }}">
+            <input type="hidden" name="appointment_id" value="{{ appointment_id }}">
+            <input type="text" name="amount" class="tipsPopup__form_input popup__input" placeholder="0.00" required>
+            <a style="display: flex; justify-content: center;"><button class="notes__footer_btn payPopupOpen" type="submit">Оплатить</button></a>
+            	<a href="/" style="display: flex; justify-content: center;">
+		<img src="{% static 'img/Logo.svg' %}" alt="Logo" class="logo header__logo">
+	</a>
+		</form>
+	</div>
+
+</body>
+
+</html>

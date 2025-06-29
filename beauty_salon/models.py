@@ -20,7 +20,12 @@ class Client(models.Model):
         verbose_name="Согласие ОПД",
         default=False
     )
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
 
     class Meta:
         verbose_name = "Клиент"
@@ -48,11 +53,6 @@ class Service(models.Model):
         verbose_name="Картинка",
         blank=True,
     )
-    image = models.ImageField(
-        upload_to="media/service_img/",
-        verbose_name="Картинка",
-        blank=True,
-    )
 
     class Meta:
         verbose_name = "Услуга"
@@ -77,7 +77,7 @@ class Salon(models.Model):
         max_length=50,
         blank=True,
     )
-    image = models.FileField(
+    image = models.ImageField(
         upload_to="media/salon_img/",
         verbose_name="Картинка",
         blank=True,
@@ -173,7 +173,6 @@ class Appointment(models.Model):
         ("19:00", "19:00"),
     )
 
-    # Основная информация о записи
     status = models.CharField(
         verbose_name="Статус записи",
         max_length=20,
@@ -220,9 +219,14 @@ class Appointment(models.Model):
         verbose_name="Согласие ОПД",
         default=False
     )
-    
-    # Связи с другими моделями
-    client = models.ForeignKey('Client', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Клиент")
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="Клиент"
+    )
     master = models.ForeignKey(
         Master,
         on_delete=models.CASCADE,
@@ -247,6 +251,37 @@ class Appointment(models.Model):
         null=True,
         blank=True,
     )
+    PAYMENT_STATUS = (
+        ('pending', 'Ожидает оплаты'),
+        ('waiting', 'Ожидает подтверждения'),
+        ('paid', 'Оплачено'),
+        ('failed', 'Ошибка оплаты')
+    )
+
+    payment_status = models.CharField(
+        "Статус оплаты",
+        max_length=20,
+        choices=PAYMENT_STATUS,
+        default='pending'
+    )
+    yookassa_payment_id = models.CharField(
+        "ID платежа ЮKassa",
+        max_length=100,
+        blank=True,
+        null=True
+    )
+    payment_date = models.DateTimeField(
+        "Дата оплаты",
+        null=True,
+        blank=True
+    )
+    tips = models.DecimalField(
+        verbose_name="Чаевые",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = "Запись"
@@ -258,20 +293,16 @@ class Appointment(models.Model):
         return f"Клиент [{self.phone}]"
 
     def get_client_name(self):
-        """Получить имя клиента из связанного Client или из поля client_name"""
         if self.client and hasattr(self.client, 'user') and self.client.user:
             return self.client.user.first_name or self.client_name
         return self.client_name
 
     def get_client_phone(self):
-        """Получить телефон клиента из связанного Client или из поля phone"""
         if self.client:
             return self.client.phone
         return self.phone
 
     def save(self, *args, **kwargs):
-        """Автоматически связываем с клиентом по телефону при сохранении и проверяем дублирование"""
-        # Проверяем дублирование только для новых записей с полными данными
         if not self.pk and self.date and self.time and self.master and self.salon:
             existing = Appointment.objects.filter(
                 date=self.date,
@@ -280,17 +311,16 @@ class Appointment(models.Model):
                 salon=self.salon,
                 status__in=['recorded', 'completed']
             ).exists()
-            
+
             if existing:
                 raise ValueError('Мастер уже занят в это время')
-        
-        # Автоматически связываем с клиентом по телефону
+
         if self.phone and not self.client:
             try:
                 self.client = Client.objects.get(phone=self.phone)
             except Client.DoesNotExist:
                 pass
-        
+
         super().save(*args, **kwargs)
 
 
