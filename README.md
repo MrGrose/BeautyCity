@@ -41,11 +41,13 @@
 ```
 
 2. Создание файла настроек `.env`:
-```bash
-    SECRET_KEY=ваш_секретный_ключ
-    DEBUG=ваша_настройка
-    ALLOWED_HOSTS=ваша_настройка
-```
+
+    - [SECRET_KEY](https://docs.djangoproject.com/en/5.2/ref/settings/#secret-key) =ваш_секретный_ключ
+    - [DEBUG](https://docs.djangoproject.com/en/5.2/ref/settings/#debug) =ваша_настройка
+    - [ALLOWED_HOSTS](https://docs.djangoproject.com/en/5.2/ref/settings/#allowed-hosts) =ваша_настройка
+    - [YOOKASSA_SHOP_ID](https://yookassa.ru/docs/support/merchant/payments/implement/test-store) =ваш_секретный_id
+    - YOOKASSA_SECRET_KEY=ваш_секретный_ключ
+
 
 3. Настройте проект Django, внесите в settings.py.
 ```bash
